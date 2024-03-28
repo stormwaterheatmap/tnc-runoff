@@ -37,22 +37,64 @@ class ClimateTSBucket(storage.Client):
     def bucket(self):
         return self.get_bucket(self._bucket_name)
 
-    def get_precip_files(self, model: str):
-        precips = self.list_blobs(self._bucket_name, match_glob=f"**{model}**input**")
+    @staticmethod
+    def _process_list_arg(arg: str | list[str]):
+        if isinstance(arg, str):
+            arg = [arg]
+
+        return "{" + ",".join(arg) + "}"
+
+    def get_precip_files(
+        self,
+        model: str | list[str] | None = None,
+        gridcell: str | list[str] | None = None,
+    ):
+        if model is None:
+            model = self.models
+
+        if gridcell is None:
+            gridcell = self.gridcells
+
+        modelq = self._process_list_arg(model)
+        gridcellq = self._process_list_arg(gridcell)
+
+        precips = self.bucket.list_blobs(
+            match_glob=f"*{modelq}*/*{gridcellq}*/input*json"
+        )
         return [file.name for file in precips]
 
-    def get_datetime_file(self, model: str):
-        file = next(
-            self.list_blobs(self._bucket_name, match_glob=f"**{model}**datetime**"),
-            None,
-        )
-        return file.name if file else None
+    def get_datetime_file(self, model: str | list[str] | None = None):
+        if model is None:
+            model = self.models
+        modelq = self._process_list_arg(model)
+        file = next(self.bucket.list_blobs(match_glob=f"*{modelq}*/datetime*csv"))
+        return file.name
+
+    def get_error_files(
+        self,
+        model: str | list[str] | None = None,
+        gridcell: str | list[str] | None = None,
+    ):
+        if model is None:
+            model = self.models
+
+        if gridcell is None:
+            gridcell = self.gridcells
+
+        modelq = self._process_list_arg(model)
+        gridcellq = self._process_list_arg(gridcell)
+
+        errs = self.bucket.list_blobs(match_glob=f"*{modelq}*/*{gridcellq}**.error")
+        return [file.name for file in errs]
 
     def _get_dt_info(self, model: str):
+        if model not in self.models:
+            raise ValueError(f"model must be one of: {self.models}")
         if model not in self._datetime_cache:
-            dtstr = self.bucket.get_blob(
-                self.get_datetime_file(model)
-            ).download_as_string()
+            blob = self.bucket.get_blob(self.get_datetime_file(model))
+            if blob is None:
+                raise ValueError(f"No datetime file for model {model}")
+            dtstr = blob.download_as_string()
 
             df = pandas.read_csv(BytesIO(dtstr))
             start = pandas.to_datetime(
@@ -75,6 +117,8 @@ class ClimateTSBucket(storage.Client):
         if not path.endswith("json"):
             raise ValueError("not a json file.")
         blob = self.bucket.get_blob(path)
+        if blob is None:
+            raise ValueError(f"No blob at path {path}")
         blob_data = blob.download_as_string()
         return orjson.loads(blob_data)
 
