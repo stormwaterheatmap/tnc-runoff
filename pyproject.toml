@@ -29,9 +29,15 @@ dependencies = [
     "orjson",
     "pydantic",
     "pydantic-settings",
+    "rich",
     "hsp2@https://github.com/Geosyntec/HSPsquared/archive/slim/859dc0d.zip",
+    "tqdm",
+    "typer",
 ]
 dynamic = ["version"]
+
+[project.scripts]
+run-tnc = "tnc.cli:app"
 
 [tool.setuptools]
 package-dir = { tnc = "tnc" }

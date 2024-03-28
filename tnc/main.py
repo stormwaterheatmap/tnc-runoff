@@ -1,8 +1,7 @@
 import math
 import os
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-from random import random
-from time import perf_counter, sleep
+from time import perf_counter
 
 from .bucket import get_client
 from .hspf_runner import SimInfo, get_input_ts, run_hrus
@@ -18,12 +17,12 @@ def run_one_inputfile(input_file, siminfo, client=None):
 
 
 def send_json(client, path, data):
-    sleep(random())  # add jitter for the thundering herd
     client.send_json(path, data)
     return path
 
 
-def send_results_for_one_inputfile(input_file, results, client=None):
+def send_results_for_one_inputfile(input_file, results, max_workers=None, client=None):
+    start = perf_counter()
     if client is None:
         client = get_client()
     args = []
@@ -32,48 +31,58 @@ def send_results_for_one_inputfile(input_file, results, client=None):
         path = "/".join(input_file.split("/")[:-1]) + f"/results/{hru}.{ext}"
         args.append((path, data))
 
-    N_WORKERS = max(math.ceil((os.cpu_count() or 1) * 0.5), 2)
-    with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
+    with ThreadPoolExecutor(max_workers) as executor:
         _ = [executor.submit(send_json, client, path, data) for path, data in args]
-
-
-def run_and_send_results_for_one_inputfile(input_file, siminfo, client=None):
-    sleep(random() * 4)  # add jitter for the thundering herd
-
-    start = perf_counter()
-    if client is None:
-        client = get_client()
-    results = run_one_inputfile(input_file, siminfo, client)
-    send_results_for_one_inputfile(input_file, results, client)
-
     end = perf_counter()
     elapsed = end - start
     return input_file, elapsed
 
 
+def run_and_send_results_for_one_inputfile(
+    input_file, siminfo, max_workers=None, client=None
+):
+    start = perf_counter()
+    if client is None:
+        client = get_client()
+
+    start = perf_counter()
+    results = run_one_inputfile(input_file, siminfo, client)
+    end = perf_counter()
+
+    _, send_time = send_results_for_one_inputfile(
+        input_file, results, max_workers=max_workers, client=client
+    )
+
+    elapsed = end - start
+    return input_file, elapsed, send_time
+
+
 def gather_args(
-    models: str | list[str] | None = None,
+    model: str | list[str] | None = None,
     gridcell: str | list[str] | None = None,
-) -> list[tuple[str, SimInfo]]:
-    args: list[tuple[str, SimInfo]] = []
+) -> list[dict[str, str | SimInfo]]:
     client = get_client()
-    if models is None:
-        models = client.models
-    if isinstance(models, str):
-        models = [models]
+    if model is None:
+        model = client.models
+    if isinstance(model, str):
+        model = [model]
 
-    valid_models = {m for m in client.models for substr in models if substr in m}
-
+    valid_models = {m for m in client.models for substr in model if substr in m}
+    args: list[dict[str, str | SimInfo]] = []
     for model in valid_models:
         siminfo = client.get_TNC_siminfo(model)
         gridcells_precip = client.get_precip_files(model=model, gridcell=gridcell)
         for input_file in sorted(gridcells_precip):
-            args.append((input_file, siminfo))
+            args.append({"input_file": input_file, "siminfo": siminfo})
     return args
 
 
-def main():
-    args = gather_args() * 3
+def main(
+    model: str | list[str] | None = None,
+    gridcell: str | list[str] | None = None,
+):
+    raise DeprecationWarning("use cli")
+    args = gather_args(model, gridcell) * 2
 
     N_WORKERS = max(math.ceil((os.cpu_count() or 1) * 0.5), 2)
 
@@ -83,15 +92,25 @@ def main():
     with ProcessPoolExecutor(N_WORKERS) as exe:
         print(f"starting {N_WORKERS} parallel workers to do {len(args)} jobs...")
         # submit tasks and collect futures
-        futures = [exe.submit(run_and_send_results_for_one_inputfile, *i) for i in args]
+        futures = [
+            exe.submit(
+                run_and_send_results_for_one_inputfile,
+                **i,
+                max_workers=N_WORKERS,
+            )
+            for i in args
+        ]
 
         # process task results as they are available
         for future in as_completed(futures):
-            result, seconds = future.result()
+            result, seconds, send_time = future.result()
 
             elapsed = f"{seconds: 0.3f}"
-            print(f"{result} completed in {elapsed} seconds")
-            timings.append(seconds)
+            print(
+                f"{result} computed in {elapsed} seconds; "
+                f"uploaded in {send_time:0.2f} seconds"
+            )
+            timings.append(seconds + send_time)
 
     end_all = perf_counter()
     tot_time = end_all - start
