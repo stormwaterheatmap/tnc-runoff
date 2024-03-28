@@ -71,3 +71,34 @@ def get_wwhm_params_imp():
         .set_index("hru")
         .sort_index()
     )
+
+
+@cache
+def get_bs_evap(start, end):
+    et_factor = 1
+
+    _wwhm_evap = (
+        pandas.read_csv(settings.BS_EVAP, sep=r"\s+", parse_dates=["Date"])
+        .assign(Month=lambda df: df["Date"].dt.month)
+        .groupby("Month")[["1-in"]]
+        .mean()
+    )
+
+    return (
+        pandas.concat([_wwhm_evap] * 220, ignore_index=True)[["1-in"]]
+        .assign(
+            datetime=pandas.date_range(
+                start=start - pandas.Timedelta(days=365), periods=12 * 220, freq="ME"
+            )
+        )
+        .set_index("datetime")
+        .resample("1D")
+        .bfill()  # Convert from monthly to daily frequency
+        .resample("1h")
+        .ffill()  # Convert from daily to hourly frequency
+        .loc[start:end]  # *25.4
+        .to_numpy()
+        .flatten()
+        / (1440 / 60)
+        * et_factor  # Convert from units of in/day to in/hr and apply et factor
+    )

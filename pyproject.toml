@@ -26,6 +26,9 @@ dependencies = [
     "pandas",
     "numba",
     "google-cloud-storage",
+    "orjson",
+    "pydantic",
+    "pydantic-settings",
     "hsp2@https://github.com/Geosyntec/HSPsquared/archive/slim/859dc0d.zip",
 ]
 dynamic = ["version"]
@@ -36,7 +39,7 @@ package-dir = { tnc = "tnc" }
 [tool.setuptools.dynamic]
 version = { attr = "tnc.__version__" }
 
-[tool.ruff]
+[tool.ruff.lint]
 select = [
     "E", # pycodestyle errors
     "W", # pycodestyle warnings
