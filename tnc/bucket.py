@@ -8,7 +8,7 @@ import pandas
 from google.cloud import storage
 
 from .config import settings
-from .hspf_runner import get_TNC_siminfo
+from .hspf_runner import SimInfo, get_TNC_siminfo
 
 
 class ClimateTSBucket(storage.Client):
@@ -27,7 +27,7 @@ class ClimateTSBucket(storage.Client):
         ]
 
     @cached_property
-    def hrus(self):
+    def hrus(self):  # pragma: no cover
         return [
             f.name.split("/")[-1].split(".")[0]
             for f in self.bucket.list_blobs(match_glob=f"{self.models[0]}/**hru*")
@@ -63,18 +63,17 @@ class ClimateTSBucket(storage.Client):
         )
         return [file.name for file in precips]
 
-    def get_datetime_file(self, model: str | list[str] | None = None):
-        if model is None:
-            model = self.models
-        modelq = self._process_list_arg(model)
-        file = next(self.bucket.list_blobs(match_glob=f"*{modelq}*/datetime*csv"))
+    def get_datetime_file(self, model: str) -> str:
+        if model not in self.models:
+            raise ValueError(f"model must be one of: {self.models}")
+        file = next(self.bucket.list_blobs(match_glob=f"*{model}*/datetime*csv"))
         return file.name
 
     def get_error_files(
         self,
         model: str | list[str] | None = None,
         gridcell: str | list[str] | None = None,
-    ):
+    ):  # pragma: no cover
         if model is None:
             model = self.models
 
@@ -92,7 +91,7 @@ class ClimateTSBucket(storage.Client):
             raise ValueError(f"model must be one of: {self.models}")
         if model not in self._datetime_cache:
             blob = self.bucket.get_blob(self.get_datetime_file(model))
-            if blob is None:
+            if blob is None:  # pragma: no cover
                 raise ValueError(f"No datetime file for model {model}")
             dtstr = blob.download_as_string()
 
@@ -108,7 +107,7 @@ class ClimateTSBucket(storage.Client):
 
         return self._datetime_cache[model]
 
-    def get_TNC_siminfo(self, model: str):
+    def get_TNC_siminfo(self, model: str) -> SimInfo:
         dt_info = self._get_dt_info(model)
 
         return get_TNC_siminfo(dt_info["start"], dt_info["stop"])
@@ -119,10 +118,10 @@ class ClimateTSBucket(storage.Client):
         blob = self.bucket.get_blob(path)
         if blob is None:
             raise ValueError(f"No blob at path {path}")
-        blob_data = blob.download_as_string()
+        blob_data = blob.download_as_bytes()
         return orjson.loads(blob_data)
 
-    def send_json(self, destination_filename, data):
+    def send_json(self, destination_filename, data):  # pragma: no cover
         blob = self.bucket.blob(destination_filename)
         blob.upload_from_string(
             orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY).replace(
@@ -130,6 +129,8 @@ class ClimateTSBucket(storage.Client):
             ),
             content_type="application/json",
         )
+
+        return destination_filename
 
 
 def get_client():

@@ -22,6 +22,7 @@ Model = Annotated[
         help="name of the model to process. Defaults to all models in the bucket.",
     ),
 ]
+
 GridCell = Annotated[
     Optional[list[str]],
     typer.Option(
@@ -29,6 +30,16 @@ GridCell = Annotated[
         "--gridcell",
         help="name of the gridcell to process. "
         "Defaults to all gridcells in the bucket.",
+    ),
+]
+
+HRUs = Annotated[
+    Optional[list[str]],
+    typer.Option(
+        "-h",
+        "--hru",
+        help="name of the HRU to process. "
+        "Defaults to all 30 HRUs in the input files.",
     ),
 ]
 
@@ -52,34 +63,37 @@ DryRun = Annotated[
 
 
 @app.command()
-def main(
+def find(model: Model = None, gridcell: GridCell = None):
+    args = gather_args(model, gridcell)
+    nargs = len(args)
+
+    if nargs > 0:
+        typer.echo(f"found {nargs} files...")
+    for dct in args:
+        typer.echo(dct["input_file"])
+
+
+@app.command()
+def run(
     model: Model = None,
     gridcell: GridCell = None,
+    hrus: HRUs = None,
     ncores: NCores = N_WORKERS,
-    dry_run: DryRun = False,
 ):
     """
     Run the HSPF IWater and PWater routines for the selected Precip & PET files
     and upload the result to Google Cloud Storage.
 
     EXAMPLES:
-    >>> run-tnc
+    >>> tnc run
 
-    >>> run-tnc -m HIS -m NARR -g R17 -g C42
+    >>> tnc run -m HIS -m NARR -g R17 -g C42
 
-    >>> run-tnc -m HIS -g R17C42
+    >>> tnc run -m HIS -g R17C42 -h hru250
     """
     args = gather_args(model, gridcell)
     nargs = len(args)
     ncores = min(ncores, nargs)
-
-    if dry_run:
-        if nargs > 0:
-            typer.echo(f"found {nargs} files...")
-        for dct in args:
-            typer.echo(dct["input_file"])
-
-        return
 
     timings = []
     start = perf_counter()
@@ -95,7 +109,9 @@ def main(
                 future = exe.submit(
                     run_and_send_results_for_one_inputfile,
                     **kwargs,
+                    hrus=hrus,
                     max_workers=ncores,
+                    client=None,
                 )
 
                 future.add_done_callback(lambda p: progress.update())

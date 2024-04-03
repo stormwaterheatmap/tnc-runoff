@@ -74,11 +74,11 @@ def get_wwhm_params_imp():
 
 
 @cache
-def get_bs_evap(start, end):
+def get_temp_evap(start, end):
     et_factor = 1
 
     _wwhm_evap = (
-        pandas.read_csv(settings.BS_EVAP, sep=r"\s+", parse_dates=["Date"])
+        pandas.read_csv(settings.TEMP_EVAP, sep=r"\s+", parse_dates=["Date"])
         .assign(Month=lambda df: df["Date"].dt.month)
         .groupby("Month")[["1-in"]]
         .mean()
@@ -102,3 +102,18 @@ def get_bs_evap(start, end):
         / (1440 / 60)
         * et_factor  # Convert from units of in/day to in/hr and apply et factor
     )
+
+
+@cache
+def wwhm_hru_params() -> dict[str, dict[str, int | float]]:
+    wwhm_params_per = get_wwhm_params_per()
+    wwhm_params_imp = get_wwhm_params_imp()
+
+    hru_params = {}
+
+    for df in [wwhm_params_imp, wwhm_params_per]:
+        hrus = df.index
+        for hru in hrus:
+            hru_params[hru] = df.loc[hru].to_dict()
+
+    return hru_params

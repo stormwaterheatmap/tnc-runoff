@@ -2,7 +2,6 @@ import traceback as tb
 from datetime import datetime
 
 import numpy
-import pandas
 from HSP2.IWATER import iwater
 from HSP2.PWATER import pwater
 from numba import types
@@ -10,7 +9,7 @@ from numba.typed import Dict
 from pydantic import TypeAdapter
 from typing_extensions import TypedDict
 
-from . import convert, wwhm
+from . import wwhm
 
 
 class SimInfo(TypedDict):
@@ -19,6 +18,9 @@ class SimInfo(TypedDict):
     delt: int
     steps: int
     units: int
+
+
+InputTS = dict[str, numpy.ndarray]
 
 
 siminfo_validator = TypeAdapter(SimInfo)
@@ -39,47 +41,19 @@ def get_TNC_siminfo(start: datetime, end: datetime) -> SimInfo:
     return siminfo
 
 
-def get_input_ts(data, siminfo):
-    return {
-        "PREC": numpy.array(data["precip"]) * convert.MM_TO_INCH,
-        "PETINP": wwhm.get_bs_evap(siminfo["start"], siminfo["stop"]),
-    }
+def get_input_ts(data):
+    ts = Dict.empty(key_type=types.unicode_type, value_type=types.float64[:])
+    ts.update(data)
+
+    return ts
 
 
-def build_uci(params: pandas.Series) -> dict:
-    return {"PARAMETERS": params.to_dict()}
+def build_uci(params: dict) -> dict:
+    return {"PARAMETERS": params}
 
 
-def build_ts(
-    steps: int, input_ts: dict[str, numpy.ndarray], hru: str, params: pandas.Series
-):
-    tsf = Dict.empty(key_type=types.unicode_type, value_type=types.float64[:])
-
-    ui_ts_params = ["NSUR", "RETSC"]
-    if hru[-2:-1] != "5":  # 5 means impervious, else means pervious
-        ui_ts_params = [
-            "AGWRC",
-            "CEPSC",
-            "DEEPFR",
-            "INFILT",
-            "INTFW",
-            "IRC",
-            "KVARY",
-            "LZETP",
-            "LZSN",
-            "NSUR",
-            "UZSN",
-        ]
-    tsf.update(input_ts)
-
-    for param in ui_ts_params:
-        tsf[param] = numpy.full(steps, params[param])
-
-    return tsf
-
-
-def run_hspf(*, siminfo, uci, ts, func=iwater, precision=4):
-    errors, msgs = func(None, siminfo=siminfo, uci=uci, ts=ts)
+def run_hspf(*, siminfo: SimInfo, uci, ts, func=iwater, precision=4):
+    errors, msgs = func(None, siminfo=siminfo, uci=uci, ts=get_input_ts(ts))
     zeros = numpy.zeros(siminfo["steps"])
     results = {
         "SURO": zeros + ts.get("SURO", zeros).round(precision),
@@ -90,35 +64,35 @@ def run_hspf(*, siminfo, uci, ts, func=iwater, precision=4):
     return results, errors, msgs
 
 
-def run_hrus(input_ts, siminfo):
+def run_hru(input_ts, siminfo: SimInfo, hru: str) -> dict:
+    params = wwhm.wwhm_hru_params()[hru]
+
+    uci = build_uci(params)
+    ts = input_ts
+    func = pwater if hru[-2:-1] != "5" else iwater
+    try:
+        results, errors, msgs = run_hspf(siminfo=siminfo, uci=uci, ts=ts, func=func)
+        exception = None
+
+    except Exception as e:  # pragma: no cover
+        results, errors, msgs = None, None, None
+        exception = "".join(tb.format_exception(None, e, e.__traceback__))
+
+    return {
+        "hru": hru,
+        "results": results,
+        "errors": errors,
+        "messages": msgs,
+        "exception": exception,
+    }
+
+
+def run_hrus(input_ts: InputTS, siminfo, hrus: list[str] | None = None):
+    if hrus is None:
+        hrus = list(wwhm.wwhm_hru_params().keys())
+
     all_hru_results = {}
 
-    wwhm_params_per = wwhm.get_wwhm_params_per()
-    wwhm_params_imp = wwhm.get_wwhm_params_imp()
-
-    for df in [wwhm_params_imp, wwhm_params_per]:
-        hrus = df.index
-        for hru in hrus:
-            param_series = df.loc[hru]
-
-            uci = build_uci(param_series)
-            ts = build_ts(siminfo["steps"], input_ts, hru, param_series)
-            func = pwater if hru[-2:-1] != "5" else iwater
-            try:
-                results, errors, msgs = run_hspf(
-                    siminfo=siminfo, uci=uci, ts=ts, func=func
-                )
-                exception = None
-
-            except Exception as e:
-                results, errors, msgs = None, None, None
-                exception = "".join(tb.format_exception(None, e, e.__traceback__))
-
-            all_hru_results[hru] = {
-                "results": results,
-                "errors": errors,
-                "messages": msgs,
-                "exception": exception,
-            }
-
+    for hru in hrus:
+        all_hru_results[hru] = run_hru(input_ts, siminfo, hru)
     return all_hru_results
