@@ -22,6 +22,8 @@ jobs:
         run: |
           pip install -e .[test]
       - name: Test and Coverage
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
         run: |
           make coverage
           coverage xml
