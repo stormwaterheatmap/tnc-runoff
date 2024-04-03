@@ -36,8 +36,12 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+test = ["coverage>=7.2", "pandas>=2", "pytest>=7.4", "pytest-cov>=4.1"]
+dev = ["tnc_runoff[test]", "pre-commit>=3.3.3,<4.0.0", "ruff>=0.1.4"]
+
 [project.scripts]
-run-tnc = "tnc.cli:app"
+tnc = "tnc.cli:app"
 
 [tool.setuptools]
 package-dir = { tnc = "tnc" }
@@ -45,8 +49,8 @@ package-dir = { tnc = "tnc" }
 [tool.setuptools.dynamic]
 version = { attr = "tnc.__version__" }
 
-[tool.ruff.lint]
-select = [
+[tool.ruff]
+lint.select = [
     "E", # pycodestyle errors
     "W", # pycodestyle warnings
     "F", # pyflakes
@@ -54,3 +58,9 @@ select = [
     "C", # flake8-comprehensions
     "B", # flake8-bugbear
 ]
+
+[tool.coverage]
+run.omit = ["tnc/cli.py"]
+run.source = ["tnc"]
+run.branch = true
+report.show_missing = true
