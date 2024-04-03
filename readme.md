@@ -1,5 +1,8 @@
 # TNC helper for running gridded models through HSPF IWater & PWater subroutines
 
+![ci](https://github.com/stormwaterheatmap/tnc-runoff/actions/workflows/test.yml/badge.svg?branch=main)
+[![codecov](https://codecov.io/gh/stormwaterheatmap/tnc-runoff/graph/badge.svg?token=HV181RMNFM)](https://codecov.io/gh/stormwaterheatmap/tnc-runoff)
+
 ## Getting started
 
 create conda env with numpy built with mkl
