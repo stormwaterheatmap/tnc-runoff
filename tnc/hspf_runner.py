@@ -1,5 +1,6 @@
 import traceback as tb
 from datetime import datetime
+from typing import Any
 
 import numpy
 from HSP2.IWATER import iwater
@@ -41,7 +42,7 @@ def get_TNC_siminfo(start: datetime, end: datetime) -> SimInfo:
     return siminfo
 
 
-def get_input_ts(data):
+def build_numba_ts(data):
     ts = Dict.empty(key_type=types.unicode_type, value_type=types.float64[:])
     ts.update(data)
 
@@ -53,7 +54,10 @@ def build_uci(params: dict) -> dict:
 
 
 def run_hspf(*, siminfo: SimInfo, uci, ts, func=iwater, precision=4):
-    errors, msgs = func(None, siminfo=siminfo, uci=uci, ts=get_input_ts(ts))
+    """
+    ts: mutable numba.typed.Dict
+    """
+    errors, msgs = func(None, siminfo=siminfo, uci=uci, ts=ts)
     zeros = numpy.zeros(siminfo["steps"])
     results = {
         "SURO": zeros + ts.get("SURO", zeros).round(precision),
@@ -64,11 +68,13 @@ def run_hspf(*, siminfo: SimInfo, uci, ts, func=iwater, precision=4):
     return results, errors, msgs
 
 
-def run_hru(input_ts, siminfo: SimInfo, hru: str) -> dict:
+def run_hru(ts, siminfo: SimInfo, hru: str) -> dict:
+    """
+    ts: mutable numba.typed.Dict
+    """
     params = wwhm.wwhm_hru_params()[hru]
 
     uci = build_uci(params)
-    ts = input_ts
     func = pwater if hru[-2:-1] != "5" else iwater
     try:
         results, errors, msgs = run_hspf(siminfo=siminfo, uci=uci, ts=ts, func=func)
@@ -87,12 +93,15 @@ def run_hru(input_ts, siminfo: SimInfo, hru: str) -> dict:
     }
 
 
-def run_hrus(input_ts: InputTS, siminfo, hrus: list[str] | None = None):
-    if hrus is None:
+def run_hrus(
+    input_ts: InputTS, siminfo, hrus: list[str] | None = None
+) -> dict[str, dict[str, Any]]:
+    if hrus is None:  # pragma: no cover
         hrus = list(wwhm.wwhm_hru_params().keys())
 
     all_hru_results = {}
 
     for hru in hrus:
-        all_hru_results[hru] = run_hru(input_ts, siminfo, hru)
+        ts = build_numba_ts(input_ts)  # this must be built for each hru; it's mutable
+        all_hru_results[hru] = run_hru(ts, siminfo, hru)
     return all_hru_results

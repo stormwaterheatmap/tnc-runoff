@@ -1,3 +1,4 @@
+from datetime import datetime
 from functools import cache
 
 import pandas
@@ -77,6 +78,8 @@ def get_wwhm_params_imp():
 def get_temp_evap(start, end):
     et_factor = 1
 
+    nyears = (end.year + 1) - (start.year - 1) + 1
+
     _wwhm_evap = (
         pandas.read_csv(settings.TEMP_EVAP, sep=r"\s+", parse_dates=["Date"])
         .assign(Month=lambda df: df["Date"].dt.month)
@@ -84,11 +87,11 @@ def get_temp_evap(start, end):
         .mean()
     )
 
-    return (
-        pandas.concat([_wwhm_evap] * 220, ignore_index=True)[["1-in"]]
+    wwhm_evap = (
+        pandas.concat([_wwhm_evap] * nyears, ignore_index=True)[["1-in"]]
         .assign(
             datetime=pandas.date_range(
-                start=start - pandas.Timedelta(days=365), periods=12 * 220, freq="ME"
+                start=datetime(start.year - 1, 1, 1), periods=12 * (nyears), freq="ME"
             )
         )
         .set_index("datetime")
@@ -96,12 +99,14 @@ def get_temp_evap(start, end):
         .bfill()  # Convert from monthly to daily frequency
         .resample("1h")
         .ffill()  # Convert from daily to hourly frequency
-        .loc[start:end]  # *25.4
+        .loc[start:end]
         .to_numpy()
         .flatten()
-        / (1440 / 60)
+        / 24
         * et_factor  # Convert from units of in/day to in/hr and apply et factor
     )
+
+    return wwhm_evap
 
 
 @cache
