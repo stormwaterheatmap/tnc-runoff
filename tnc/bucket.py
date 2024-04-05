@@ -1,19 +1,15 @@
 import base64
 import json
 from functools import cached_property
-from io import BytesIO
 
 import orjson
-import pandas
 from google.cloud import storage
 
 from .config import settings
-from .hspf_runner import SimInfo, get_TNC_siminfo
 
 
 class ClimateTSBucket(storage.Client):
     _bucket_name = "climate_ts"
-    _datetime_cache = {}
 
     @cached_property
     def models(self):
@@ -63,12 +59,6 @@ class ClimateTSBucket(storage.Client):
         )
         return [file.name for file in precips]
 
-    def get_datetime_file(self, model: str) -> str:
-        if model not in self.models:
-            raise ValueError(f"model must be one of: {self.models}")
-        file = next(self.bucket.list_blobs(match_glob=f"*{model}*/datetime*csv"))
-        return file.name
-
     def get_error_files(
         self,
         model: str | list[str] | None = None,
@@ -86,32 +76,6 @@ class ClimateTSBucket(storage.Client):
         errs = self.bucket.list_blobs(match_glob=f"*{modelq}*/*{gridcellq}**.error")
         return [file.name for file in errs]
 
-    def _get_dt_info(self, model: str):
-        if model not in self.models:
-            raise ValueError(f"model must be one of: {self.models}")
-        if model not in self._datetime_cache:
-            blob = self.bucket.get_blob(self.get_datetime_file(model))
-            if blob is None:  # pragma: no cover
-                raise ValueError(f"No datetime file for model {model}")
-            dtstr = blob.download_as_string()
-
-            df = pandas.read_csv(BytesIO(dtstr))
-            start = pandas.to_datetime(
-                df.iloc[0]["datetime"].replace("Z", "+00:00")
-            ).replace(tzinfo=None)
-            stop = pandas.to_datetime(
-                df.iloc[-1]["datetime"].replace("Z", "+00:00")
-            ).replace(tzinfo=None)
-
-            self._datetime_cache[model] = {"datetime": df, "start": start, "stop": stop}
-
-        return self._datetime_cache[model]
-
-    def get_TNC_siminfo(self, model: str) -> SimInfo:
-        dt_info = self._get_dt_info(model)
-
-        return get_TNC_siminfo(dt_info["start"], dt_info["stop"])
-
     def get_json(self, path: str):
         if not path.endswith("json"):
             raise ValueError("not a json file.")
@@ -121,13 +85,32 @@ class ClimateTSBucket(storage.Client):
         blob_data = blob.download_as_bytes()
         return orjson.loads(blob_data)
 
+    def rm_blob(self, path: str):  # pragma: no cover
+        blob = self.bucket.get_blob(path)
+        if blob is None:
+            return
+
+        generation_match_precondition = None
+
+        blob.reload()  # Fetch blob metadata to use in generation_match_precondition.
+        generation_match_precondition = blob.generation
+
+        blob.delete(if_generation_match=generation_match_precondition)
+
+    def send_parquet(self, destination_filename, bytes_str):
+        blob = self.bucket.blob(destination_filename)
+        blob.upload_from_string(
+            bytes_str, content_type="application/vnd.apache.parquet"
+        )
+        return destination_filename
+
     def send_json(self, destination_filename, data):  # pragma: no cover
         blob = self.bucket.blob(destination_filename)
         blob.upload_from_string(
             orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY).replace(
                 b"0.0,", b"0,"
             ),
-            content_type="application/json",
+            "application/json",
         )
 
         return destination_filename
