@@ -1,8 +1,9 @@
 import traceback as tb
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import numpy
+import pandas
 from HSP2.IWATER import iwater
 from HSP2.PWATER import pwater
 from numba import types
@@ -59,10 +60,20 @@ def run_hspf(*, siminfo: SimInfo, uci, ts, func=iwater, precision=4):
     """
     errors, msgs = func(None, siminfo=siminfo, uci=uci, ts=ts)
     zeros = numpy.zeros(siminfo["steps"])
+    dix = pandas.date_range(
+        start=pandas.Timestamp("1970-01-01 00:00:00"),
+        end=siminfo["stop"],
+        freq="1h",
+    )
+    ixi = cast(int, dix.get_loc(siminfo["start"]))
+    ixe = ixi + siminfo["steps"]
     results = {
-        "SURO": zeros + ts.get("SURO", zeros).round(precision),
-        "AGWO": zeros + ts.get("AGWO", zeros).round(precision),
-        "INTFW": zeros + ts.get("INTFW", zeros).round(precision),
+        "ix": numpy.arange(ixi, ixe, dtype=numpy.uint32),
+        "SURO": (zeros + ts.get("SURO", zeros).round(precision)).astype(numpy.float32),
+        "AGWO": (zeros + ts.get("AGWO", zeros).round(precision)).astype(numpy.float32),
+        "INTFW": (zeros + ts.get("INTFW", zeros).round(precision)).astype(
+            numpy.float32
+        ),
     }
 
     return results, errors, msgs
