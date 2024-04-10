@@ -30,9 +30,9 @@ def build_petinp(siminfo, data):
             method="ffill",
         )  # aah! this result is hourly freq but in mm/day!
         .div(24)  # aah! this result is mm/hr
-        .div(25.4)  # phew, this result is in/hr
         .to_numpy()
         .flatten()
+        * convert.MM_TO_INCH  # phew, this result is in/hr
     )
 
     return petinp
