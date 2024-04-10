@@ -97,8 +97,9 @@ def run(
     if hrus is None:
         hrus = list(wwhm.wwhm_hru_params().keys())
 
+    data, siminfo = main.get_data_and_siminfo(**args[0], client=client)
     # fully prime the numba cache by running a perv and imp hru
-    main.run_one_inputfile(**args[0], hrus=["hru000", "hru252"], client=client)
+    main.run_one_datafile(data=data, siminfo=siminfo, hrus=["hru000", "hru252"])
 
     nargs = len(args)
     ncores = min(ncores, nargs)

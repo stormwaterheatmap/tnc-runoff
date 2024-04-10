@@ -1,16 +1,16 @@
 import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 from time import perf_counter
 
 import numpy
+import orjson
 import pandas
-import pyarrow as pa
-import pyarrow.parquet as pq
 from tqdm import tqdm
 
 from . import convert, wwhm
 from .bucket import ClimateTSBucket, get_client
-from .hspf_runner import InputTS, get_TNC_siminfo, run_hrus
+from .hspf_runner import InputTS, SimInfo, get_TNC_siminfo, run_hrus
 
 
 def build_petinp(siminfo, data):
@@ -53,28 +53,21 @@ def build_ts(
     return input_ts
 
 
-def run_one_inputfile(
-    input_file,
+def run_one_datafile(
+    data,
+    siminfo,
     hrus: list[str] | None = None,
-    client: ClimateTSBucket | None = None,
 ):
-    if client is None:  # pragma: no cover
-        client = get_client()
-    data = client.get_json(input_file)
-    start = pandas.to_datetime(data["start_time"])
-    stop = pandas.to_datetime(data["end_time"]) + pandas.Timedelta("23h")
-    siminfo = get_TNC_siminfo(start, stop)
     input_ts: InputTS = build_ts(data, siminfo)
-
     return run_hrus(input_ts, siminfo, hrus)
 
 
 def send_results_for_one_hru(
-    input_file_path: str, hru: str, data: dict, client=None
+    *, input_file: str, hru: str, data: dict, siminfo: SimInfo, client=None
 ) -> tuple[str, str]:
     if client is None:  # pragma: no cover
         client = get_client()
-    base_path = "/".join(input_file_path.split("/")[:-1])
+    base_path = "/".join(input_file.split("/")[:-1])
     ext = "meta" if not data["exception"] else "error"
     if ext == "meta":  # pragma: no cover
         client.rm_blob(base_path + f"/results/{hru}.error")
@@ -82,9 +75,41 @@ def send_results_for_one_hru(
     res = data.pop("results", None)
     resname = ""
     if res:  # pragma: no branch
-        table = pa.table(res)
+        table = pandas.DataFrame(res)
+        table[["SURO", "AGWO", "INTFW"]] *= convert.INCH_TO_MM
+        model, gridcell = base_path.split("/")
+        id_ = base_path + f"/{hru}"
+
+        zeros = numpy.zeros(siminfo["steps"])
+        table["id"] = pandas.Series(zeros, dtype="category").cat.rename_categories(
+            {0: id_}
+        )
+
+        table["start_time"] = pandas.Series(
+            zeros, dtype="category"
+        ).cat.rename_categories({0: siminfo["start"].isoformat()})
+
+        table["end_time"] = pandas.Series(
+            zeros, dtype="category"
+        ).cat.rename_categories({0: siminfo["stop"].isoformat()})
+
+        metadata = {
+            "model": str(model),
+            "rc": str(gridcell),
+            "hru": str(hru),
+            "start_time": siminfo["start"].isoformat(),
+            "end_time": siminfo["stop"].isoformat(),
+            "steps": str(siminfo["steps"]),
+            "runoff_units": "depth (mm)",
+        }
+        meta_str = orjson.dumps(metadata).decode()
+        table["meta"] = pandas.Series(zeros, dtype="category").cat.rename_categories(
+            {0: meta_str}
+        )
         b = io.BytesIO()
-        pq.write_table(table, b)
+        # compression makes no difference on uploaded size,
+        # but measurably slows down the process
+        table.to_parquet(b, index=False, compression=None)
         b.seek(0)
 
         parquet_path = base_path + f"/results/{hru}.parquet"
@@ -97,7 +122,7 @@ def send_results_for_one_hru(
 
 
 def send_results_for_one_inputfile(
-    input_file, results, max_workers=None, client=None
+    *, input_file, results, siminfo, max_workers=None, client=None
 ) -> tuple[str, float, list[tuple[str, str]]]:
     start = perf_counter()
     if client is None:  # pragma: no cover
@@ -107,7 +132,12 @@ def send_results_for_one_inputfile(
     with ThreadPoolExecutor(max_workers) as executor:
         futures = [
             executor.submit(
-                send_results_for_one_hru, input_file, hru, data, client=client
+                send_results_for_one_hru,
+                input_file=input_file,
+                hru=hru,
+                data=deepcopy(data),
+                siminfo=siminfo,
+                client=client,
             )
             for hru, data in results.items()
         ]
@@ -118,6 +148,20 @@ def send_results_for_one_inputfile(
     end = perf_counter()
     elapsed = end - start
     return input_file, elapsed, completed
+
+
+def get_data_and_siminfo(
+    input_file: str,
+    client: ClimateTSBucket | None = None,
+):
+    if client is None:  # pragma: no cover
+        client = get_client()
+    data = client.get_json(input_file)
+    start_time = pandas.to_datetime(data["start_time"])
+    end_time = pandas.to_datetime(data["end_time"]) + pandas.Timedelta("23h")
+    siminfo = get_TNC_siminfo(start_time, end_time)
+
+    return data, siminfo
 
 
 def run_and_send_results_for_one_inputfile(
@@ -131,12 +175,18 @@ def run_and_send_results_for_one_inputfile(
     if client is None:  # pragma: no cover
         client = get_client()
 
+    data, siminfo = get_data_and_siminfo(input_file, client=client)
+
     start = perf_counter()
-    results = run_one_inputfile(input_file, hrus=hrus, client=client)
+    results = run_one_datafile(data, siminfo, hrus=hrus)
     end = perf_counter()
 
     _, send_time, completed = send_results_for_one_inputfile(
-        input_file, results, max_workers=max_workers, client=client
+        input_file=input_file,
+        results=results,
+        siminfo=siminfo,
+        max_workers=max_workers,
+        client=client,
     )
 
     run_time = end - start
@@ -218,4 +268,4 @@ def run(
 
 
 if __name__ == "__main__":  # pragma: no cover
-    run()
+    run("HIS", "R18C42", ["hru250"])
