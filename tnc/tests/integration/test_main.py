@@ -37,7 +37,7 @@ def test_run_and_send_integration(client):
     kwargs = gather_args(client.models[0], client.gridcells[0], client).pop()
 
     run_and_send_results_for_one_inputfile(
-        **kwargs, max_workers=None, hrus=None, client=client
+        **kwargs, max_workers=None, hrus=["hru010", "hru250"], client=client
     )
 
 
