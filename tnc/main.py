@@ -17,9 +17,10 @@ def build_petinp(siminfo, data):
     start = siminfo["start"]
     end = siminfo["stop"]
 
+    daterange = pandas.date_range(start=start, end=end, freq="1D")
     petinp = (
-        pandas.DataFrame({"petinp": data["petinp"].get("data", [])})
-        .assign(datetime=pandas.date_range(start=start, end=end, freq="1D"))
+        pandas.DataFrame({"petinp": data["petinp"].get("data", [])[: len(daterange)]})
+        .assign(datetime=daterange)
         .set_index("datetime")
         .reindex(
             pandas.date_range(
@@ -67,18 +68,20 @@ def send_results_for_one_hru(
 ) -> tuple[str, str]:
     if client is None:  # pragma: no cover
         client = get_client()
-    base_path = "/".join(input_file.split("/")[:-1])
+    model, _, input_file_name = input_file.split("/")
+    gridcell = input_file_name.split("-")[0]
+    base_path = model
+    fname = f"{gridcell}-{hru}"
     ext = "meta" if not data["exception"] else "error"
     if ext == "meta":  # pragma: no cover
-        client.rm_blob(base_path + f"/results/{hru}.error")
+        client.rm_blob(base_path + f"/meta/{fname}.error")
 
     res = data.pop("results", None)
     resname = ""
     if res:  # pragma: no branch
         table = pandas.DataFrame(res)
-        table[["SURO", "AGWO", "INTFW"]] *= convert.INCH_TO_MM
-        model, gridcell = base_path.split("/")
-        id_ = base_path + f"/{hru}"
+        table[["SURO", "AGWO", "IFWO"]] *= convert.INCH_TO_MM
+        id_ = base_path + f"/results/{fname.replace('-', '/')}"
 
         zeros = numpy.zeros(siminfo["steps"])
         table["id"] = pandas.Series(zeros, dtype="category").cat.rename_categories(
@@ -112,10 +115,10 @@ def send_results_for_one_hru(
         table.to_parquet(b, index=False, compression=None)
         b.seek(0)
 
-        parquet_path = base_path + f"/results/{hru}.parquet"
+        parquet_path = id_ + ".parquet"
         resname = client.send_parquet(parquet_path, b.read())
 
-    meta_path = base_path + f"/results/{hru}.{ext}"
+    meta_path = base_path + f"/meta/{fname}.{ext}"
     meta_name = client.send_json(meta_path, data)
 
     return resname, meta_name
@@ -207,8 +210,10 @@ def gather_args(
 
     valid_models = {m for m in client.models for substr in model if substr in m}
     args: list[dict[str, str]] = []
-    for model in valid_models:
-        gridcells_precip = client.get_precip_files(model=model, gridcell=gridcell)
+    if len(valid_models) > 0:
+        gridcells_precip = client.get_precip_files(
+            model=list(valid_models), gridcell=gridcell
+        )
         for input_file in sorted(gridcells_precip):
             args.append({"input_file": input_file})
     return args

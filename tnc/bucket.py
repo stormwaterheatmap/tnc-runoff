@@ -13,21 +13,24 @@ class ClimateTSBucket(storage.Client):
 
     @cached_property
     def models(self):
-        return ["WRF-NARR_HIS"]
+        return [
+            "WRF-NARR_HIS",
+            "WRF-NARR_HIS_pet",
+        ]
 
     @cached_property
     def gridcells(self):
         return [
-            f.name.split("/")[1]
+            f.name.split("inputs/")[1].split("-")[0]
             for f in self.bucket.list_blobs(match_glob=f"{self.models[0]}/**input*")
         ]
 
-    @cached_property
-    def hrus(self):  # pragma: no cover
-        return [
-            f.name.split("/")[-1].split(".")[0]
-            for f in self.bucket.list_blobs(match_glob=f"{self.models[0]}/**hru*")
-        ]
+    # @cached_property
+    # def hrus(self):  # pragma: no cover
+    #     return [
+    #         f.name.split("/")[-1].split(".")[0]
+    #         for f in self.bucket.list_blobs(match_glob=f"{self.models[0]}/**hru*")
+    #     ]
 
     @property
     def bucket(self):
@@ -38,7 +41,7 @@ class ClimateTSBucket(storage.Client):
         if isinstance(arg, str):
             arg = [arg]
 
-        return "{" + ",".join(arg) + "}"
+        return "{" + ",".join(set(arg)) + "}"
 
     def get_precip_files(
         self,
@@ -55,7 +58,7 @@ class ClimateTSBucket(storage.Client):
         gridcellq = self._process_list_arg(gridcell)
 
         precips = self.bucket.list_blobs(
-            match_glob=f"*{modelq}*/*{gridcellq}*/input*json"
+            match_glob=f"*{modelq}*/inputs/*{gridcellq}*input.json"
         )
         return [file.name for file in precips]
 
@@ -73,7 +76,7 @@ class ClimateTSBucket(storage.Client):
         modelq = self._process_list_arg(model)
         gridcellq = self._process_list_arg(gridcell)
 
-        errs = self.bucket.list_blobs(match_glob=f"*{modelq}*/*{gridcellq}**.error")
+        errs = self.bucket.list_blobs(match_glob=f"*{modelq}**{gridcellq}*.error")
         return [file.name for file in errs]
 
     def get_json(self, path: str):

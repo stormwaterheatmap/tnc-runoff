@@ -71,9 +71,7 @@ def run_hspf(*, siminfo: SimInfo, uci, ts, func=iwater, precision=4):
         "ix": numpy.arange(ixi, ixe, dtype=numpy.uint32),
         "SURO": (zeros + ts.get("SURO", zeros).round(precision)).astype(numpy.float32),
         "AGWO": (zeros + ts.get("AGWO", zeros).round(precision)).astype(numpy.float32),
-        "INTFW": (zeros + ts.get("INTFW", zeros).round(precision)).astype(
-            numpy.float32
-        ),
+        "IFWO": (zeros + ts.get("IFWO", zeros).round(precision)).astype(numpy.float32),
     }
 
     return results, errors, msgs
