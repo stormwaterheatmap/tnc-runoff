@@ -31,7 +31,7 @@ dependencies = [
     "pydantic",
     "pydantic-settings",
     "rich",
-    "hsp2@https://github.com/Geosyntec/HSPsquared/archive/slim/859dc0d.zip",
+    "hsp2@https://github.com/Geosyntec/HSPsquared/archive/slim/ebef454.zip",
     "tqdm",
     "typer",
 ]
