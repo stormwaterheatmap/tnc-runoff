@@ -13,7 +13,7 @@ from .bucket import ClimateTSBucket, get_client
 from .hspf_runner import InputTS, SimInfo, get_TNC_siminfo, run_hrus
 
 
-def build_petinp(siminfo, data):
+def build_petinp(siminfo, data):  # pragma: no cover
     start = siminfo["start"]
     end = siminfo["stop"]
 
@@ -44,7 +44,7 @@ def build_ts(
     siminfo,
 ):
     precip = numpy.array(data["prec"].get("data")) * convert.MM_TO_INCH
-    if "petinp" in data:
+    if "petinp" in data:  # pragma: no cover
         petinp = build_petinp(siminfo, data)
     else:
         petinp = wwhm.get_temp_evap(siminfo["start"], siminfo["stop"])

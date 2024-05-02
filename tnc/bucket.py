@@ -15,7 +15,6 @@ class ClimateTSBucket(storage.Client):
     def models(self):
         return [
             "WRF-NARR_HIS",
-            "WRF-NARR_HIS_pet",
         ]
 
     @cached_property
@@ -48,11 +47,8 @@ class ClimateTSBucket(storage.Client):
         model: str | list[str] | None = None,
         gridcell: str | list[str] | None = None,
     ):
-        if model is None:
-            model = self.models
-
-        if gridcell is None:
-            gridcell = self.gridcells
+        model = model or "*"
+        gridcell = gridcell or "*"
 
         modelq = self._process_list_arg(model)
         gridcellq = self._process_list_arg(gridcell)
@@ -67,11 +63,8 @@ class ClimateTSBucket(storage.Client):
         model: str | list[str] | None = None,
         gridcell: str | list[str] | None = None,
     ):  # pragma: no cover
-        if model is None:
-            model = self.models
-
-        if gridcell is None:
-            gridcell = self.gridcells
+        model = model or "*"
+        gridcell = gridcell or "*"
 
         modelq = self._process_list_arg(model)
         gridcellq = self._process_list_arg(gridcell)
