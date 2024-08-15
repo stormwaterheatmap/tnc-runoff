@@ -5,22 +5,8 @@ from ...hspf_runner import get_TNC_siminfo
 from ...main import (
     build_ts,
     gather_args,
-    get_client,
     run_and_send_results_for_one_inputfile,
 )
-
-
-@pytest.fixture(scope="module")
-def client():
-    c = get_client()
-
-    def overwrite_send(destination_filename, data):
-        return destination_filename
-
-    c.send_json = overwrite_send
-    c.send_parquet = overwrite_send
-
-    return c
 
 
 @pytest.mark.parametrize("model", [None, "HIS", ["HIS"], "--missing--"])
@@ -38,7 +24,10 @@ def test_run_and_send_integration(client):
     kwargs = gather_args(client.models[0], client.gridcells[0], client).pop()
 
     run_and_send_results_for_one_inputfile(
-        **kwargs, max_workers=None, hrus=["hru010", "hru250"], client=client
+        **kwargs,
+        max_workers=None,
+        hrus=["hru010", "hru250"],
+        client_factory=lambda: client,
     )
 
 

@@ -6,6 +6,7 @@ import pandas
 import pytest
 
 from ..hspf_runner import get_TNC_siminfo
+from ..main import get_client
 
 regression_data = Path(__file__).parent / "regression_data"
 
@@ -43,3 +44,16 @@ def regression_siminfo():
     return get_TNC_siminfo(
         datetime(1980, 1, 1), datetime(1981, 1, 1), model="m", gridcell="R18C42"
     )
+
+
+@pytest.fixture(scope="module")
+def client():
+    c = get_client()
+
+    def overwrite_send(destination_filename, data):
+        return destination_filename
+
+    c.send_json = overwrite_send
+    c.send_parquet = overwrite_send
+
+    return c

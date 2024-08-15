@@ -9,7 +9,7 @@ import pandas
 from tqdm import tqdm
 
 from . import convert, pet, wwhm
-from .bucket import ClimateTSBucket, get_client
+from .bucket import ClientFactory, ClimateTSBucket, get_client
 from .hspf_runner import InputTS, SimInfo, get_TNC_siminfo, run_hrus
 
 
@@ -177,11 +177,13 @@ def run_and_send_results_for_one_inputfile(
     input_file,
     max_workers=None,
     hrus: list[str] | None = None,
-    client: ClimateTSBucket | None = None,
+    client_factory: ClientFactory | None = None,
 ):
     start = perf_counter()
-    if client is None:  # pragma: no cover
-        client = get_client()
+    if client_factory is None:  # pragma: no cover
+        client_factory = get_client
+
+    client = client_factory()
 
     data, siminfo = get_data_and_siminfo(input_file, client=client)
 
@@ -214,13 +216,16 @@ def gather_args(
         model = [model]
 
     valid_models = {m for m in client.models for substr in model if substr in m}
-    args: list[dict[str, str]] = []
-    if len(valid_models) > 0:
-        gridcells_precip = client.get_precip_files(
-            model=list(valid_models), gridcell=gridcell
+    if not valid_models:
+        return []
+
+    args: list[dict[str, str]] = [
+        {"input_file": input_file}
+        for input_file in sorted(
+            client.get_precip_files(model=list(valid_models), gridcell=gridcell)
         )
-        for input_file in sorted(gridcells_precip):
-            args.append({"input_file": input_file})
+    ]
+
     return args
 
 
@@ -255,7 +260,7 @@ def run(
             **kwargs,
             hrus=hrus,
             max_workers=None,
-            client=None,
+            client_factory=None,
         )
         timings.append((seconds, send_time))
 
