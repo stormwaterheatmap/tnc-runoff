@@ -50,18 +50,22 @@ package-dir = { tnc = "tnc" }
 [tool.setuptools.dynamic]
 version = { attr = "tnc.__version__" }
 
+[tool.setuptools.package-data]
+"tnc.data" = ["*"]
+
 [tool.ruff]
 lint.select = [
-    "E", # pycodestyle errors
-    "W", # pycodestyle warnings
-    "F", # pyflakes
-    "I", # isort
-    "C", # flake8-comprehensions
-    "B", # flake8-bugbear
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "C",      # flake8-comprehensions
+    "B",      # flake8-bugbear
+    "PERF",   # Perflint
+    "NPY201", # numpy v2
 ]
 
 [tool.coverage]
-run.omit = ["tnc/cli.py"]
 run.source = ["tnc"]
 run.branch = true
 report.show_missing = true
