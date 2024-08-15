@@ -18,6 +18,7 @@ def client():
         return destination_filename
 
     c.send_json = overwrite_send
+    c.send_parquet = overwrite_send
 
     return c
 
@@ -48,7 +49,7 @@ def test_get_ts_from_client_integration(client, gridcell):
     data = client.get_json(input_file)
     start = pandas.to_datetime(data["start_time"])
     stop = pandas.to_datetime(data["end_time"]) + pandas.Timedelta("23h")
-    siminfo = get_TNC_siminfo(start, stop)
+    siminfo = get_TNC_siminfo(start, stop, model="m", gridcell=gridcell)
 
     ts = build_ts(data, siminfo)
 

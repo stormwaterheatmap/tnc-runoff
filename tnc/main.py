@@ -8,7 +8,7 @@ import orjson
 import pandas
 from tqdm import tqdm
 
-from . import convert, wwhm
+from . import convert, pet, wwhm
 from .bucket import ClimateTSBucket, get_client
 from .hspf_runner import InputTS, SimInfo, get_TNC_siminfo, run_hrus
 
@@ -39,76 +39,83 @@ def build_petinp(siminfo, data):  # pragma: no cover
     return petinp
 
 
-def build_ts(
-    data,
-    siminfo,
-):
+def build_ts(data, siminfo):
     precip = numpy.array(data["prec"].get("data")) * convert.MM_TO_INCH
     if "petinp" in data:  # pragma: no cover
         petinp = build_petinp(siminfo, data)
     else:
-        petinp = wwhm.get_temp_evap(siminfo["start"], siminfo["stop"])
+        petinp = pet.build_evap_ts(siminfo).to_numpy()
 
     input_ts: InputTS = {"PREC": precip, "PETINP": petinp}
 
     return input_ts
 
 
-def run_one_datafile(
-    data,
-    siminfo,
-    hrus: list[str] | None = None,
-):
+def run_one_datafile(data, siminfo, hrus: list[str] | None = None):
     input_ts: InputTS = build_ts(data, siminfo)
     return run_hrus(input_ts, siminfo, hrus)
 
 
+def build_results_table_for_one_hru(res, run_id, siminfo, metadata) -> pandas.DataFrame:
+    table = pandas.DataFrame(res)
+    table[["SURO", "AGWO", "IFWO"]] *= convert.INCH_TO_MM
+    runoff_units = "depth (mm)"
+
+    zeros = numpy.zeros(siminfo["steps"])
+    table["id"] = pandas.Series(zeros, dtype="category").cat.rename_categories(
+        {0: run_id}
+    )
+
+    table["start_time"] = pandas.Series(zeros, dtype="category").cat.rename_categories(
+        {0: siminfo["start"].isoformat()}
+    )
+
+    table["end_time"] = pandas.Series(zeros, dtype="category").cat.rename_categories(
+        {0: siminfo["stop"].isoformat()}
+    )
+
+    metadata.update(
+        {
+            "start_time": siminfo["start"].isoformat(),
+            "end_time": siminfo["stop"].isoformat(),
+            "steps": str(siminfo["steps"]),
+            "runoff_units": runoff_units,
+        }
+    )
+
+    meta_str = orjson.dumps(metadata).decode()
+    table["meta"] = pandas.Series(
+        numpy.zeros(siminfo["steps"]), dtype="category"
+    ).cat.rename_categories({0: meta_str})
+
+    return table
+
+
 def send_results_for_one_hru(
-    *, input_file: str, hru: str, data: dict, siminfo: SimInfo, client=None
+    *, hru: str, data: dict, siminfo: SimInfo, client=None
 ) -> tuple[str, str]:
     if client is None:  # pragma: no cover
         client = get_client()
-    model, _, input_file_name = input_file.split("/")
-    gridcell = input_file_name.split("-")[0]
-    base_path = model
+    model, gridcell = siminfo["model"], siminfo["gridcell"]
     fname = f"{gridcell}-{hru}"
+    id_ = model + f"/results/{fname.replace('-', '/')}"
     ext = "meta" if not data["exception"] else "error"
     if ext == "meta":  # pragma: no cover
-        client.rm_blob(base_path + f"/meta/{fname}.error")
+        client.rm_blob(model + f"/meta/{fname}.error")
 
     res = data.pop("results", None)
+
     resname = ""
     if res:  # pragma: no branch
-        table = pandas.DataFrame(res)
-        table[["SURO", "AGWO", "IFWO"]] *= convert.INCH_TO_MM
-        id_ = base_path + f"/results/{fname.replace('-', '/')}"
-
-        zeros = numpy.zeros(siminfo["steps"])
-        table["id"] = pandas.Series(zeros, dtype="category").cat.rename_categories(
-            {0: id_}
-        )
-
-        table["start_time"] = pandas.Series(
-            zeros, dtype="category"
-        ).cat.rename_categories({0: siminfo["start"].isoformat()})
-
-        table["end_time"] = pandas.Series(
-            zeros, dtype="category"
-        ).cat.rename_categories({0: siminfo["stop"].isoformat()})
-
         metadata = {
             "model": str(model),
             "rc": str(gridcell),
             "hru": str(hru),
-            "start_time": siminfo["start"].isoformat(),
-            "end_time": siminfo["stop"].isoformat(),
-            "steps": str(siminfo["steps"]),
-            "runoff_units": "depth (mm)",
         }
-        meta_str = orjson.dumps(metadata).decode()
-        table["meta"] = pandas.Series(zeros, dtype="category").cat.rename_categories(
-            {0: meta_str}
+        table = build_results_table_for_one_hru(
+            res, id_, siminfo=siminfo, metadata=metadata
         )
+
         b = io.BytesIO()
         # compression makes no difference on uploaded size,
         # but measurably slows down the process
@@ -118,7 +125,7 @@ def send_results_for_one_hru(
         parquet_path = id_ + ".parquet"
         resname = client.send_parquet(parquet_path, b.read())
 
-    meta_path = base_path + f"/meta/{fname}.{ext}"
+    meta_path = model + f"/meta/{fname}.{ext}"
     meta_name = client.send_json(meta_path, data)
 
     return resname, meta_name
@@ -136,7 +143,6 @@ def send_results_for_one_inputfile(
         futures = [
             executor.submit(
                 send_results_for_one_hru,
-                input_file=input_file,
                 hru=hru,
                 data=deepcopy(data),
                 siminfo=siminfo,
@@ -153,16 +159,15 @@ def send_results_for_one_inputfile(
     return input_file, elapsed, completed
 
 
-def get_data_and_siminfo(
-    input_file: str,
-    client: ClimateTSBucket | None = None,
-):
+def get_data_and_siminfo(input_file: str, client: ClimateTSBucket | None = None):
     if client is None:  # pragma: no cover
         client = get_client()
     data = client.get_json(input_file)
     start_time = pandas.to_datetime(data["start_time"])
     end_time = pandas.to_datetime(data["end_time"]) + pandas.Timedelta("23h")
-    siminfo = get_TNC_siminfo(start_time, end_time)
+    model, _, input_file_name = input_file.split("/")
+    gridcell = input_file_name.split("-")[0]
+    siminfo = get_TNC_siminfo(start_time, end_time, model, gridcell)
 
     return data, siminfo
 

@@ -75,7 +75,22 @@ def get_wwhm_params_imp():
 
 
 @cache
-def get_temp_evap(start, end):
+def wwhm_hru_params() -> dict[str, dict[str, int | float]]:
+    wwhm_params_per = get_wwhm_params_per()
+    wwhm_params_imp = get_wwhm_params_imp()
+
+    hru_params = {}
+
+    for df in [wwhm_params_imp, wwhm_params_per]:
+        hrus = df.index
+        for hru in hrus:
+            hru_params[hru] = df.loc[hru].to_dict()
+
+    return hru_params
+
+
+@cache
+def get_temp_evap(start, end):  # pragma: no cover
     et_factor = 1
 
     nyears = (end.year + 1) - (start.year - 1) + 1
@@ -94,31 +109,14 @@ def get_temp_evap(start, end):
                 start=datetime(start.year - 1, 1, 1), periods=12 * (nyears), freq="ME"
             )
         )
-        .set_index("datetime")
+        .set_index("datetime")["1-in"]
         .resample("1D")
         .bfill()  # Convert from monthly to daily frequency
         .resample("1h")
         .ffill()  # Convert from daily to hourly frequency
         .loc[start:end]
-        .to_numpy()
-        .flatten()
-        / 24
-        * et_factor  # Convert from units of in/day to in/hr and apply et factor
+        .div(24)
+        .mul(et_factor)  # Convert from units of in/day to in/hr and apply et factor
     )
 
     return wwhm_evap
-
-
-@cache
-def wwhm_hru_params() -> dict[str, dict[str, int | float]]:
-    wwhm_params_per = get_wwhm_params_per()
-    wwhm_params_imp = get_wwhm_params_imp()
-
-    hru_params = {}
-
-    for df in [wwhm_params_imp, wwhm_params_per]:
-        hrus = df.index
-        for hru in hrus:
-            hru_params[hru] = df.loc[hru].to_dict()
-
-    return hru_params
