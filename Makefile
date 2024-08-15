@@ -55,7 +55,7 @@ test: clean
 	pytest
 
 coverage: clean
-	pytest --cov
+	pytest -n 4 --cov
 
 lint: clean
 	ruff check . --fix
