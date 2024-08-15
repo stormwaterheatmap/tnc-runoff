@@ -1,6 +1,7 @@
 import base64
 import json
 from functools import cached_property
+from typing import Callable
 
 import orjson
 from google.cloud import storage
@@ -102,6 +103,9 @@ class ClimateTSBucket(storage.Client):
         )
 
         return destination_filename
+
+
+ClientFactory = Callable[..., ClimateTSBucket]
 
 
 def get_client():
