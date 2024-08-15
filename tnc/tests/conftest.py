@@ -40,4 +40,6 @@ def regression_result_ts():
 
 @pytest.fixture(scope="module")
 def regression_siminfo():
-    return get_TNC_siminfo(datetime(1980, 1, 1), datetime(1981, 1, 1))
+    return get_TNC_siminfo(
+        datetime(1980, 1, 1), datetime(1981, 1, 1), model="m", gridcell="R18C42"
+    )

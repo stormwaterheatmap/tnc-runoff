@@ -20,6 +20,8 @@ class SimInfo(TypedDict):
     delt: int
     steps: int
     units: int
+    model: str
+    gridcell: str
 
 
 InputTS = dict[str, numpy.ndarray]
@@ -28,7 +30,9 @@ InputTS = dict[str, numpy.ndarray]
 siminfo_validator = TypeAdapter(SimInfo)
 
 
-def get_TNC_siminfo(start: datetime, end: datetime) -> SimInfo:
+def get_TNC_siminfo(
+    start: datetime, end: datetime, model: str, gridcell: str
+) -> SimInfo:
     delt: int = 60
     siminfo = siminfo_validator.validate_python(
         {
@@ -37,6 +41,8 @@ def get_TNC_siminfo(start: datetime, end: datetime) -> SimInfo:
             "delt": delt,
             "steps": int((end - start).days * (1440 / delt)),
             "units": 1,
+            "model": model,
+            "gridcell": gridcell,
         }
     )
 

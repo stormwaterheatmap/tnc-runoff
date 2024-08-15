@@ -22,14 +22,8 @@ class ClimateTSBucket(storage.Client):
         return [
             f.name.split("inputs/")[1].split("-")[0]
             for f in self.bucket.list_blobs(match_glob=f"{self.models[0]}/**input*")
+            if "inputs/" in f.name
         ]
-
-    # @cached_property
-    # def hrus(self):  # pragma: no cover
-    #     return [
-    #         f.name.split("/")[-1].split(".")[0]
-    #         for f in self.bucket.list_blobs(match_glob=f"{self.models[0]}/**hru*")
-    #     ]
 
     @property
     def bucket(self):
@@ -93,11 +87,9 @@ class ClimateTSBucket(storage.Client):
 
         blob.delete(if_generation_match=generation_match_precondition)
 
-    def send_parquet(self, destination_filename, bytes_str):
+    def send_parquet(self, destination_filename, data):  # pragma: no cover
         blob = self.bucket.blob(destination_filename)
-        blob.upload_from_string(
-            bytes_str, content_type="application/vnd.apache.parquet"
-        )
+        blob.upload_from_string(data, content_type="application/vnd.apache.parquet")
         return destination_filename
 
     def send_json(self, destination_filename, data):  # pragma: no cover
