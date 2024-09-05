@@ -11,7 +11,7 @@ from typing_extensions import Annotated
 from . import main, wwhm
 from .bucket import get_client
 
-N_WORKERS = max(math.ceil((os.cpu_count() or 1) * 0.5), 2)
+N_WORKERS = min(math.ceil((os.cpu_count() or 1) * 0.5), 4)
 
 
 Model = Annotated[
@@ -86,6 +86,7 @@ def create_app(client_factory=None):
         gridcell: GridCell = None,
         hrus: HRUs = None,
         ncores: NCores = N_WORKERS,
+        dry_run: DryRun = False,
     ):
         """
         Run the HSPF IWater and PWater routines for the selected Precip & PET files
@@ -98,7 +99,7 @@ def create_app(client_factory=None):
 
         >>> tnc run -m HIS -g R17C42 -h hru250
         """
-        client = client_factory()
+        client = client_factory(dry_run)
         args = main.gather_args(model, gridcell, client=client)
         if hrus is None:  # pragma: no cover
             hrus = list(wwhm.wwhm_hru_params().keys())
@@ -112,6 +113,8 @@ def create_app(client_factory=None):
 
         timings = []
         start = perf_counter()
+
+        completed = []
 
         with ProcessPoolExecutor(ncores) as exe:
             typer.echo(f"starting {ncores} parallel workers to do {nargs} jobs...")
@@ -127,6 +130,7 @@ def create_app(client_factory=None):
                         hrus=hrus,
                         max_workers=ncores,
                         client_factory=client_factory,
+                        dry_run=dry_run,
                     )
 
                     future.add_done_callback(lambda p: progress.update())
@@ -134,8 +138,12 @@ def create_app(client_factory=None):
 
                 # process task results as they are available
                 for future in as_completed(futures):
-                    _, seconds, send_time, completed = future.result()
-                    timings.append((seconds, send_time))
+                    input_file, seconds, send_time, result = future.result()
+                    if seconds < 0:
+                        typer.echo(f"ERROR: {input_file}")
+                    else:
+                        completed.extend(result)
+                        timings.append((seconds, send_time))
 
         end_all = perf_counter()
 

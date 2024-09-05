@@ -48,12 +48,5 @@ def regression_siminfo():
 
 @pytest.fixture(scope="module")
 def client():
-    c = get_client()
-
-    def overwrite_send(destination_filename, data):
-        return destination_filename
-
-    c.send_json = overwrite_send
-    c.send_parquet = overwrite_send
-
+    c = get_client(dry_run=True)
     return c

@@ -1,4 +1,6 @@
 import io
+import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from time import perf_counter
@@ -11,6 +13,8 @@ from tqdm import tqdm
 from . import convert, pet, wwhm
 from .bucket import ClientFactory, ClimateTSBucket, get_client
 from .hspf_runner import InputTS, SimInfo, get_TNC_siminfo, run_hrus
+
+logger = logging.getLogger(__name__)
 
 
 def build_petinp(siminfo, data):  # pragma: no cover
@@ -92,10 +96,15 @@ def build_results_table_for_one_hru(res, run_id, siminfo, metadata) -> pandas.Da
 
 
 def send_results_for_one_hru(
-    *, hru: str, data: dict, siminfo: SimInfo, client=None
-) -> tuple[str, str]:
+    *,
+    hru: str,
+    data: dict,
+    siminfo: SimInfo,
+    client=None,
+    dry_run: bool = False,
+) -> tuple[str, str, SimInfo]:
     if client is None:  # pragma: no cover
-        client = get_client()
+        client = get_client(dry_run)
     model, gridcell = siminfo["model"], siminfo["gridcell"]
     fname = f"{gridcell}-{hru}"
     id_ = model + f"/results/{fname.replace('-', '/')}"
@@ -128,15 +137,21 @@ def send_results_for_one_hru(
     meta_path = model + f"/meta/{fname}.{ext}"
     meta_name = client.send_json(meta_path, data)
 
-    return resname, meta_name
+    return resname, meta_name, siminfo
 
 
 def send_results_for_one_inputfile(
-    *, input_file, results, siminfo, max_workers=None, client=None
-) -> tuple[str, float, list[tuple[str, str]]]:
+    *,
+    input_file,
+    results,
+    siminfo,
+    max_workers=None,
+    client=None,
+    dry_run: bool = False,
+) -> tuple[str, float, list[tuple[str, str, SimInfo]]]:
     start = perf_counter()
     if client is None:  # pragma: no cover
-        client = get_client()
+        client = get_client(dry_run)
 
     completed = []
     with ThreadPoolExecutor(max_workers) as executor:
@@ -162,7 +177,13 @@ def send_results_for_one_inputfile(
 def get_data_and_siminfo(input_file: str, client: ClimateTSBucket | None = None):
     if client is None:  # pragma: no cover
         client = get_client()
-    data = client.get_json(input_file)
+    try:
+        data = client.get_json(input_file)
+    except Exception as e:  # pragma: no cover
+        logger.exception(e)
+        # Retry once
+        time.sleep(2)
+        data = client.get_json(input_file)
     start_time = pandas.to_datetime(data["start_time"])
     end_time = pandas.to_datetime(data["end_time"]) + pandas.Timedelta("23h")
     model, _, input_file_name = input_file.split("/")
@@ -174,32 +195,39 @@ def get_data_and_siminfo(input_file: str, client: ClimateTSBucket | None = None)
 
 def run_and_send_results_for_one_inputfile(
     *,
-    input_file,
-    max_workers=None,
+    input_file: str,
+    max_workers: int | None = None,
     hrus: list[str] | None = None,
     client_factory: ClientFactory | None = None,
+    dry_run: bool = False,
 ):
-    start = perf_counter()
-    if client_factory is None:  # pragma: no cover
-        client_factory = get_client
+    try:
+        start = perf_counter()
+        if client_factory is None:  # pragma: no cover
+            client_factory = get_client
 
-    client = client_factory()
+        client = client_factory(dry_run)
 
-    data, siminfo = get_data_and_siminfo(input_file, client=client)
+        data, siminfo = get_data_and_siminfo(input_file, client=client)
 
-    start = perf_counter()
-    results = run_one_datafile(data, siminfo, hrus=hrus)
-    end = perf_counter()
+        start = perf_counter()
+        results = run_one_datafile(data, siminfo, hrus=hrus)
+        end = perf_counter()
 
-    _, send_time, completed = send_results_for_one_inputfile(
-        input_file=input_file,
-        results=results,
-        siminfo=siminfo,
-        max_workers=max_workers,
-        client=client,
-    )
+        _, send_time, completed = send_results_for_one_inputfile(
+            input_file=input_file,
+            results=results,
+            siminfo=siminfo,
+            max_workers=max_workers,
+            client=client,
+            dry_run=dry_run,
+        )
 
-    run_time = end - start
+        run_time = end - start
+    except Exception as e:  # pragma: no cover
+        logger.exception(input_file)
+        logger.exception(e)
+        return input_file, -1, -1, ("error", "error", {})
     return input_file, run_time, send_time, completed
 
 
@@ -233,6 +261,7 @@ def run(
     model: str | list[str] | None = None,
     gridcell: str | list[str] | None = None,
     hrus: list[str] | None = None,
+    dry_run: bool = False,
 ):  # pragma: no cover
     """
     Run the HSPF IWater and PWater routines for the selected Precip & PET files
@@ -261,6 +290,7 @@ def run(
             hrus=hrus,
             max_workers=None,
             client_factory=None,
+            dry_run=dry_run,
         )
         timings.append((seconds, send_time))
 

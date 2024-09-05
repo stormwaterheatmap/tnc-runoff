@@ -27,7 +27,8 @@ def test_run_and_send_integration(client):
         **kwargs,
         max_workers=None,
         hrus=["hru010", "hru250"],
-        client_factory=lambda: client,
+        client_factory=lambda *_, **__: client,
+        dry_run=True,
     )
 
 

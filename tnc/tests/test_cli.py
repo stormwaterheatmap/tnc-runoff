@@ -7,15 +7,8 @@ from ..main import get_client
 runner = CliRunner()
 
 
-def client_factory():
-    c = get_client()
-
-    def overwrite_send(destination_filename, data):  # pragma: no cover
-        return destination_filename
-
-    c.send_json = overwrite_send
-    c.send_parquet = overwrite_send
-
+def client_factory(*args, **kwargs):
+    c = get_client(dry_run=True)
     return c
 
 

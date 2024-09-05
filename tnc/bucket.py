@@ -11,11 +11,25 @@ from .config import settings
 
 class ClimateTSBucket(storage.Client):
     _bucket_name = "climate_ts"
+    _dry_run = False
+
+    @property
+    def dry_run(self):
+        return self._dry_run
+
+    @dry_run.setter
+    def dry_run(self, value: bool):
+        self._dry_run = value
 
     @cached_property
     def models(self):
         return [
             "WRF-NARR_HIS",
+            "access1.3_RCP85_PREC_6km",
+            "bcc-csm1.1_RCP85_PREC_6km",
+            "canesm2_RCP85_PREC_6km",
+            "ccsm4_RCP85_PREC_6km",
+            "csiro-mk3.6.0_RCP85_PREC_6km",
         ]
 
     @cached_property
@@ -49,7 +63,7 @@ class ClimateTSBucket(storage.Client):
         gridcellq = self._process_list_arg(gridcell)
 
         precips = self.bucket.list_blobs(
-            match_glob=f"*{modelq}*/inputs/*{gridcellq}*input.json"
+            match_glob=f"*{modelq}*/inputs/*{gridcellq}*-input.json"
         )
         return [file.name for file in precips]
 
@@ -88,19 +102,26 @@ class ClimateTSBucket(storage.Client):
 
         blob.delete(if_generation_match=generation_match_precondition)
 
-    def send_parquet(self, destination_filename, data):  # pragma: no cover
-        blob = self.bucket.blob(destination_filename)
-        blob.upload_from_string(data, content_type="application/vnd.apache.parquet")
+    def send_parquet(self, destination_filename, data) -> str:
+        if not self.dry_run:  # pragma: no cover
+            blob = self.bucket.blob(destination_filename)
+            blob.upload_from_string(
+                data,
+                content_type="application/vnd.apache.parquet",
+                num_retries=3,
+            )
         return destination_filename
 
-    def send_json(self, destination_filename, data):  # pragma: no cover
-        blob = self.bucket.blob(destination_filename)
-        blob.upload_from_string(
-            orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY).replace(
-                b"0.0,", b"0,"
-            ),
-            "application/json",
-        )
+    def send_json(self, destination_filename, data) -> str:
+        if not self.dry_run:  # pragma: no cover
+            blob = self.bucket.blob(destination_filename)
+            blob.upload_from_string(
+                data=orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY).replace(
+                    b"0.0,", b"0,"
+                ),
+                content_type="application/json",
+                num_retries=3,
+            )
 
         return destination_filename
 
@@ -108,9 +129,14 @@ class ClimateTSBucket(storage.Client):
 ClientFactory = Callable[..., ClimateTSBucket]
 
 
-def get_client():
+def get_client(dry_run: bool | None = None):
     sa_info = json.loads(
         base64.b64decode(settings.GOOGLE_APPLICATION_CREDENTIALS_JSON).decode()
     )
 
-    return ClimateTSBucket.from_service_account_info(sa_info)
+    client = ClimateTSBucket.from_service_account_info(sa_info)
+
+    if dry_run:
+        client.dry_run = True
+
+    return client
